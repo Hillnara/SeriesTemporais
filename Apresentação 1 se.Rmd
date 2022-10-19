@@ -1,0 +1,231 @@
+---
+output:
+    html_document:
+       highlight: textmate
+       theme: flatly
+       number_sections: yes
+       toc: yes
+       toc_float:
+         collapsed: yes
+         smooth_scroll: no
+---
+
+![](logo.png){width="50"}
+
+UNIVERSIDADE ESTADUAL DA PARAÍBA - UEPB
+
+CENTRO DE CIÊNCIAS E TECNOLOGIA - CCT
+
+DEPARTAMENTO DE ESTATÍSTICA
+
+ANÁLISE DE SÉRIES TEMPORAIS
+
+DOCENTE: DR. PEDRO MONTEIRO DE ALMEIDA JUNIOR
+
+DISCENTES: HILLNARA DE P. A. F. CARVALHO e JOÃO VITOR A. A. DE SOUZA 
+
+
+
+
+# Introdução
+
+Séries Temporais avalia o comportamento de uma variável ao longo do tempo. As observções coletadas são usada para analisar e entender o passado e para prever o futuro.
+
+No processo de séries temporais existem três tipos de componentes:
+
+-   **Tendência:** Ocorre quando a variável da série temporal apresenta um crescimento ou decrescimento em um certo perériodo de tempo;
+
+-   **Sazonalidade:** Corresponde a um padão fixo que se repete no mesmo período de tempo específico;
+
+-   **Erro aleatório:** Mostra todos os efeitos que não foram incluso pela série (movimentos irregulares explicados por causas desconhecidas).
+
+# Descrição dos dados
+
+O dataset contém dados históricos de sacos de cimentos vendidos no estado da Paraíba, do dia 01 de janeiro de 2017 ao dia 01 de fevereiro de 2021. <http://ipeadata.gov.br/Default.aspx>
+
+# Objetivo
+
+O intuito desta análise é avaliar e tentar prever os dados da série, os dados são registrados mensalmente. As análises foram realizadas no `software R.`
+
+# Metodologia
+
+Para o desenvolvimento deste trabalho, a metodologia adotada teve como base a pesquisa realizada na plataforma de dados *ipeadata* site
+
+## Bibliotécas
+
+```{r message=FALSE}
+library(TSA)
+library(forecast)
+library(fpp3)
+library(knitr)
+```
+
+## Banco de dados
+
+```{r}
+library(readxl)
+
+Series <- read_excel("C:/Users/hilln/OneDrive/Área de Trabalho/Series.xls")
+cimento<-Series
+kable(head(cimento))
+```
+
+## Transformando para formato tstible
+
+```{r}
+serie <- cimento %>%
+  mutate(Data = yearmonth(Data)) %>%
+  as_tsibble(index = Data)
+serie
+```
+
+## Plot das Série
+
+```{r}
+serie %>%
+  pivot_longer(-Data) %>%
+  ggplot(aes(x = Data, y = value, colour = name)) +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free_y")
+
+```
+
+## Estudo da váriavel consumo
+
+### ACF e PACF das Séries
+
+```{r}
+acf_consumo = serie %>% 
+  ACF(Consumo, lag_max = 20) %>% 
+  autoplot() + labs(title="ACF da variável Consumo")
+
+pacf_consumo = serie %>% 
+  PACF(Consumo, lag_max = 20)%>% 
+  autoplot() + labs(title="PACF da variável Consumo")
+
+gridExtra::grid.arrange(acf_consumo, pacf_consumo, ncol=2)
+
+```
+
+## Estudando a sazonalidade
+
+```{r}
+serie %>%
+  gg_season(Consumo, labels = "both") +
+  labs(y = "Consumo total",
+       title = "Sazonalidade: Consumo")
+```
+
+## Subgráficos
+
+```{r}
+serie %>%
+  gg_subseries(Consumo) +
+  labs(
+    y = "Consumo por tonelada",
+    title = "Sazonalidade: Consumo"
+  )
+
+```
+
+## Extraindo os componentes de uma serie temporal
+
+### Decomposição aditiva
+
+```{r}
+serie %>%
+  model(
+    classical_decomposition(Consumo, type = "additive")
+  ) %>%
+  components() %>%
+  autoplot() +
+  labs(title = "Decomposição classica aditiva do total de vendas")
+```
+
+### Decomposião multiplicativa
+
+```{r}
+serie %>%
+  model(
+    classical_decomposition(Consumo, type = "multiplicative")
+  ) %>%
+  components() %>%
+  autoplot() +
+  labs(title = "Decomposição clássica multiplicativa do total de vendas")
+
+```
+
+## Fazendo a previsão:
+
+### Para identificar os anos iniciais e finais
+
+```{r}
+head(serie)
+tail(serie)
+```
+
+### Definindo a base de dados em treinamento e teste
+
+```{r}
+train <- serie %>%
+  filter_index("2017" ~ "2021")
+test <- serie %>%
+  filter_index("2021" ~ .);test
+
+```
+
+### Verificando se está correto
+
+```{r}
+head(train)
+tail(train)
+```
+
+### Estimando o modelo de suavizacao
+
+```{r}
+consumo_fit <- train %>%
+  model(
+    ETS = ETS(Consumo)
+  )
+consumo_fit
+```
+
+### Gerando uma previsão há 4 passos
+
+```{r}
+consumo_fc <- consumo_fit %>% forecast(h = 20)
+consumo_fc
+```
+
+### Gráfico da série com as previsões
+
+```{r,message = FALSE}
+consumo_fc %>%
+  autoplot(train, level = NULL) +
+  autolayer(
+    test,
+    colour = "black"
+  ) +
+  labs(
+    y = "Consumo",
+    title = "Forecasts para o Consumo de Cimento"
+  ) +
+  guides(colour = guide_legend(title = "Forecast"))
+
+
+```
+
+## Análise de resíduos
+
+```{r}
+consumo_fit %>% gg_tsresiduals()
+```
+
+### Medidas de Avaliação
+
+```{r,warning=FALSE}
+accuracy(consumo_fc, test)
+```
+
+# Conclusão
